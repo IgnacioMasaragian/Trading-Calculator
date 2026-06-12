@@ -63,10 +63,10 @@ body{
 .atmos::after{content:"";position:absolute;inset:0;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.05'/%3E%3C/svg%3E");
   mix-blend-mode:overlay;pointer-events:none}
-.aurora{position:fixed;left:50%;top:42%;width:165vmax;height:165vmax;margin:-82.5vmax 0 0 -82.5vmax;z-index:-2;pointer-events:none;opacity:.5;
+.aurora{position:fixed;left:50%;top:42%;width:165vmax;height:165vmax;margin:-82.5vmax 0 0 -82.5vmax;z-index:-2;pointer-events:none;opacity:.7;
   background:conic-gradient(from 0deg,transparent 0%,rgba(61,230,188,.10) 9%,transparent 22%,rgba(64,116,255,.11) 36%,transparent 52%,rgba(61,230,188,.07) 66%,transparent 80%,rgba(132,104,255,.08) 90%,transparent 100%)}
 .pwrap{position:fixed;inset:0;z-index:-1;pointer-events:none;will-change:transform}
-.blob{position:absolute;border-radius:50%;filter:blur(90px);opacity:.55;will-change:transform}
+.blob{position:absolute;border-radius:50%;filter:blur(90px);opacity:.68;will-change:transform}
 .blob.a{width:360px;height:360px;left:-130px;top:130px;background:radial-gradient(circle,rgba(61,230,188,.20),transparent 70%)}
 .blob.b{width:460px;height:460px;right:-180px;top:440px;background:radial-gradient(circle,rgba(64,116,255,.16),transparent 70%)}
 .blob.c{width:300px;height:300px;left:34%;top:78%;background:radial-gradient(circle,rgba(140,110,255,.13),transparent 70%)}
@@ -74,14 +74,8 @@ body{
 /* ── Movimiento — ACTIVO POR DEFECTO. Solo se apaga si el sistema pide
    explícitamente "reducir movimiento" (ver bloque reduce más abajo). Así,
    cualquier visor que no responda la consulta igual anima. ─────────────── */
-.aurora{animation:spin 80s linear infinite}
-.blob.a{animation:driftA 22s ease-in-out infinite alternate}
-.blob.b{animation:driftB 30s ease-in-out infinite alternate}
-.blob.c{animation:driftC 26s ease-in-out infinite alternate}
-@keyframes spin{to{transform:rotate(360deg)}}
-@keyframes driftA{to{transform:translate(64px,-52px) scale(1.22)}}
-@keyframes driftB{to{transform:translate(-72px,46px) scale(1.16)}}
-@keyframes driftC{to{transform:translate(40px,-66px) scale(1.28)}}
+/* ── Aurora + lumas: el movimiento lo maneja JavaScript (ver driver abajo).
+   JS corre aunque el iPhone esté en Modo de bajo consumo, que pausa el CSS. ─ */
 .glass::before{animation:spec 12s ease-in-out infinite alternate}
 @keyframes spec{from{transform:translate3d(0,0,0) scale(1)}to{transform:translate3d(10px,5px,0) scale(1.03)}}
 .glass::after{opacity:1;animation:sheen 7.5s var(--ease) infinite}
@@ -537,7 +531,7 @@ input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{-webkit-appear
 
   <div class="foot">
     <p>Estimaciones para planificar — el exchange manda en liquidación y funding reales.<br>En Safari: <b>Compartir → Agregar a inicio</b> para usarla a pantalla completa.</p>
-    <p style="margin-top:7px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--ink-3)">v1.3 · glass vivo</p>
+    <p style="margin-top:7px;font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--ink-3)">v1.4 · glass vivo</p>
   </div>
 </main>
 
@@ -1219,16 +1213,32 @@ async function copySummary(){
   toast(ok?"Resumen copiado":"No pude copiar — seleccioná a mano");
 }
 
-/* ── Parallax sutil del fondo (sólo transform, sin jank) ──────────── */
+/* ── Motor de movimiento del fondo ─────────────────────────────────────
+   Maneja aurora (giro), lumas (deriva) y parallax de scroll con rAF.
+   A diferencia de las animaciones CSS, requestAnimationFrame sigue
+   corriendo en Modo de bajo consumo de iOS, así que el fondo se mueve
+   igual. Respeta "Reducir movimiento": si está activo, queda todo quieto. */
 (function(){
   try{ if(window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches) return; }catch(e){}
-  const L=[["pwA",-0.055],["pwB",0.05],["pwC",-0.032]]
-    .map(([id,f])=>[document.getElementById(id),f]).filter(x=>x[0]);
-  if(L.length===0) return;
-  let tick=false;
-  const go=()=>{ tick=false; const y=window.scrollY||0;
-    for(const [n,f] of L) n.style.transform="translate3d(0,"+(y*f).toFixed(1)+"px,0)"; };
-  window.addEventListener("scroll",()=>{ if(!tick){ tick=true; requestAnimationFrame(go); } },{passive:true});
+  var aurora=document.querySelector(".aurora");
+  var bA=document.querySelector(".blob.a"), bB=document.querySelector(".blob.b"), bC=document.querySelector(".blob.c");
+  var pw=[["pwA",-0.055],["pwB",0.05],["pwC",-0.032]]
+    .map(function(x){return [document.getElementById(x[0]),x[1]];}).filter(function(x){return x[0];});
+  if(!aurora&&!bA&&pw.length===0) return;
+  var nowFn=(window.performance&&performance.now)?function(){return performance.now();}:function(){return Date.now();};
+  var raf=window.requestAnimationFrame?window.requestAnimationFrame.bind(window):function(cb){return setTimeout(function(){cb(nowFn());},16);};
+  var t0=nowFn(), scrollY=window.scrollY||0;
+  window.addEventListener("scroll",function(){ scrollY=window.scrollY||0; },{passive:true});
+  function frame(){
+    var t=(nowFn()-t0)/1000; // segundos
+    if(aurora) aurora.style.transform="rotate("+(t*5).toFixed(2)+"deg)"; // ~72s por vuelta
+    if(bA) bA.style.transform="translate("+(Math.sin(t*0.30)*52).toFixed(1)+"px,"+(Math.cos(t*0.23)*-44).toFixed(1)+"px) scale("+(1.13+Math.sin(t*0.31)*0.11).toFixed(3)+")";
+    if(bB) bB.style.transform="translate("+(Math.cos(t*0.21)*-60).toFixed(1)+"px,"+(Math.sin(t*0.25)*44).toFixed(1)+"px) scale("+(1.11+Math.cos(t*0.27)*0.09).toFixed(3)+")";
+    if(bC) bC.style.transform="translate("+(Math.sin(t*0.27)*44).toFixed(1)+"px,"+(Math.cos(t*0.31)*-56).toFixed(1)+"px) scale("+(1.17+Math.sin(t*0.23)*0.13).toFixed(3)+")";
+    for(var i=0;i<pw.length;i++) pw[i][0].style.transform="translate3d(0,"+(scrollY*pw[i][1]).toFixed(1)+"px,0)";
+    raf(frame);
+  }
+  raf(frame);
 })();
 
 /* ════════════════════════════════════════════════════════════════════
